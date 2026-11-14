@@ -1,0 +1,19 @@
+﻿{
+  "name": "election-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Election Management and Voting System - backend (Express + node:sqlite)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# build output
+web/dist/
+
+# runtime data (SQLite file, WAL and shared-memory files)
+server/data/
+
+# generated figure working files (the PNGs are committed)
+docs/diagrams/_tmp/
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# logs
+*.log
+npm-debug.log*

@@ -1,0 +1,14 @@
+# Normalise line endings: the repo stores LF, checkouts use the platform default.
+* text=auto eol=lf
+
+# Binary assets must never be converted or diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+
+# Lock files are generated; keep them out of diffs and review noise.
+package-lock.json -diff linguist-generated=true
