@@ -6,19 +6,23 @@ import BallotView from './views/BallotView.vue';
 import ReceiptView from './views/ReceiptView.vue';
 import ResultsView from './views/ResultsView.vue';
 import AuditView from './views/AuditView.vue';
+import AdminView from './views/AdminView.vue';
 
 const user = ref(null);
 const view = ref('vote');
 const flash = ref(null);   // { kind, text }
+const ballotKey = ref(0);  // bumped to force the ballot view to reload after an admin change
 
 const isPrivileged = computed(
   () => user.value && (user.value.role === 'auditor' || user.value.role === 'admin')
 );
+const isAdmin = computed(() => user.value && user.value.role === 'admin');
 
 const tabs = computed(() => {
   if (!user.value) return [];
   const t = [{ id: 'vote', label: 'Ballot' }, { id: 'receipt', label: 'Receipt' }];
   if (isPrivileged.value) t.push({ id: 'results', label: 'Results' });
+  if (isAdmin.value) t.push({ id: 'admin', label: 'Admin' });
   t.push({ id: 'audit', label: 'Audit log' });
   return t;
 });
@@ -80,10 +84,11 @@ function dismiss() { flash.value = null; }
         <button class="ghost" @click="dismiss">Dismiss</button>
       </div>
 
-      <BallotView v-if="view === 'vote'" :user="user"
+      <BallotView v-if="view === 'vote'" :key="ballotKey" :user="user"
                   @voted="onVoted" @check-receipt="goReceipt" />
       <ReceiptView v-else-if="view === 'receipt'" />
       <ResultsView v-else-if="view === 'results'" />
+      <AdminView v-else-if="view === 'admin'" @changed="ballotKey++" />
       <AuditView v-else-if="view === 'audit'" />
     </main>
 

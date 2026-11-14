@@ -63,6 +63,7 @@ server/
   src/index.js           app wiring, static hosting of the built client
   src/db.js              schema creation, seed data, transaction helper
   src/routes/auth.js     POST /login, POST /verify, POST /logout
+  src/routes/admin.js    POST /admin/elections, /:id/candidates, /:id/open, /:id/close
   src/routes/elections.js GET elections, GET ballot
   src/routes/vote.js     POST /vote, GET /receipt/:code
   src/routes/results.js  GET /results/:electionId

@@ -38,13 +38,31 @@ examples from this build, both driven by an inspection rather than by a bug repo
 Both are small and local, which is the point: refactoring that is deferred becomes
 reengineering.
 
-## 5.3 Known limitations, in priority order
+## 5.3 Shipped in the second increment
+
+The first version of this report listed "no create/edit election UI" as the top limitation.
+That increment has since been implemented, and it is recorded here because it is the clearest
+example of the change process in Lecture 9 working as described:
+
+- **UC7 Open/close voting session**, **UC10 Manage elections**, **UC11 Manage candidates** are
+  implemented in `electionService.js` and exposed under `/api/admin/*`.
+- The state machine from figure 6 is enforced in code by a transition table, so
+  `draft → closed` and `closed → open` are both rejected (test T21). The diagram and the code
+  now agree, which is what the §4.5 inspection asked for.
+- The audit trail gained `election.created`, `election.candidate_added`, `election.open` and
+  `election.closed`, so the administrator's actions are as observable as the voter's.
+- Tests T17–T22 cover the new paths; the totals moved from 17 to 24.
+
+It was additive: no existing test changed, and the only schema impact was that
+`createElection` writes `voter_roll` rows up front instead of relying on the seed.
+
+## 5.4 Known limitations, in priority order
 
 Named honestly rather than hidden. Each is a candidate requirement for the next iteration.
 
 | # | Limitation | Consequence | Effort |
 |---|---|---|---|
-| 1 | **No create/edit election UI.** Elections and candidates are seeded; the API has no `POST /elections`. | UC1, UC10 and UC11 are modelled but not implemented. An administrator cannot run a real election without a developer. | Medium — 3 routes and 2 forms |
+| 1 | **No roll editing.** Every registered user is enrolled on every new election's roll; there is no way to remove one voter or add an outside elector. | A real election needs a roll that can be curated. | Medium — a `voter_roll` management screen |
 | 2 | **Single-node SQLite.** One writer. | Fine for 200 voters, not for a national election (see `03-architecture.md` §3.6). | High — replication and a distributed transaction |
 | 3 | **The application holds the ballot key.** | An administrator with server access can decrypt ballots. | High — threshold cryptography |
 | 4 | **No true concurrency test.** T7a/T7b cover the two mechanisms but not two OS processes racing. | A regression that only appears under real load would not be caught. | Low — a multi-process harness |
@@ -52,7 +70,7 @@ Named honestly rather than hidden. Each is a candidate requirement for the next 
 | 6 | **`has_voted` is not reversible.** A voter who spoils a ballot needs an administrator with database access. | Real elections need a documented spoil-and-reissue procedure (D3 governs it). | Medium — a new use case, not a bug fix |
 | 7 | **No verifiable bulletin board.** | The receipt proves the system *recorded* a vote, not that the vote *entered the tally*. | High — published commitments and a verifiable mix |
 
-## 5.4 Maintenance categories
+## 5.5 Maintenance categories
 
 Lecture 9 defines three: fault repair, environmental adaptation, and functionality addition.
 Mapping the list above:
@@ -63,7 +81,7 @@ Mapping the list above:
   support) are environment changes, not feature changes.
 - **Functionality addition** — limitations 1, 3, 6 and 7. These are the next iteration's scope.
 
-## 5.5 What would trigger reengineering
+## 5.6 What would trigger reengineering
 
 Lecture 9 frames reengineering as what you do when maintenance cost has already risen. The
 signals to watch, in this system's terms:
@@ -77,7 +95,7 @@ signals to watch, in this system's terms:
 None of these are hit at demo scale, which is why the answer today is *refactor*, not
 *reengineer*.
 
-## 5.6 Change process for the next increment
+## 5.7 Change process for the next increment
 
 The evolution process from Lecture 9, applied concretely:
 

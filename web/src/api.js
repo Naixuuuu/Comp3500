@@ -48,6 +48,14 @@ export const api = {
   vote: (id, candidateId) => request('POST', `/elections/${id}/vote`, { candidateId }),
   markVoted: (id, voterId) => request('POST', `/elections/${id}/mark-voted`, { voterId }),
 
+  // ---- administration (role: admin) ----
+  adminElection: (id) => request('GET', `/admin/elections/${id}`),
+  createElection: (title) => request('POST', '/admin/elections', { title }),
+  addCandidate: (id, name, party) =>
+    request('POST', `/admin/elections/${id}/candidates`, { name, party }),
+  openElection: (id) => request('POST', `/admin/elections/${id}/open`),
+  closeElection: (id) => request('POST', `/admin/elections/${id}/close`),
+
   results: (id) => request('GET', `/results/${id}`),
   audit: (limit = 200) => request('GET', `/audit?limit=${limit}`),
   receipt: (code) => request('GET', `/receipt/${encodeURIComponent(code)}`),

@@ -7,6 +7,7 @@ import { HttpError } from './errors.js';
 import authRoutes from './routes/auth.js';
 import electionRoutes, { receiptRouter } from './routes/elections.js';
 import resultRoutes, { auditRouter } from './routes/results.js';
+import adminRoutes from './routes/admin.js';
 
 export function createApp() {
   const app = express();
@@ -18,6 +19,7 @@ export function createApp() {
   app.use('/api/receipt', receiptRouter);
   app.use('/api/results', resultRoutes);
   app.use('/api/audit', auditRouter);
+  app.use('/api/admin', adminRoutes);
 
   // Serve the built Vue client when it exists, so the API and the UI share one origin.
   if (fs.existsSync(path.join(WEB_DIR, 'index.html'))) {

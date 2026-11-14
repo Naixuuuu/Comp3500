@@ -104,6 +104,8 @@ Lecture 4 defines five checks. Applying them to the table above:
 | F11 | `audit_log` table, one row per event | T10 |
 | F12 | `POST /api/elections/:id/mark-voted`, officer role only | T14 |
 | F13 | `requireRole('auditor','admin')` middleware | T11 |
-| F9 | `elections.status` checked inside the transaction | T4 |
+| F9 | `elections.status` checked inside the transaction; `POST /api/admin/elections/:id/open|close` | T4, T18, T19, T21 |
+| F1 | `POST /api/admin/elections` creates the election and its roll | T16 |
+| F10 | `resultService.getResults` decrypts and tallies | T20, T12b |
 
 The test identifiers T1–T12 refer to `docs/04-testing.md`.

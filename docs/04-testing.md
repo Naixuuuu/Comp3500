@@ -16,7 +16,7 @@ single-iteration project can support:
 
 | Stage | What it means here | Where it lives |
 |---|---|---|
-| **Development testing** | Tests the team runs while building | `server/test/api.test.js` (17 tests) |
+| **Development testing** | Tests the team runs while building | `server/test/api.test.js` (17 tests) and `server/test/admin.test.js` (7 tests) |
 | **Release testing** | Black-box checks against the specification, run on a complete build | `server/scripts/smoke.js` (17 checks on a fresh database) and `server/scripts/ui-check.js` (browser) |
 | **User testing** | Acceptance from the point of view of each role | the demo script in §4.6 |
 
@@ -30,7 +30,10 @@ single-iteration project can support:
 
 ## 4.2 Test cases
 
-Identifiers match the traceability table in `01-requirements.md`.
+Identifiers `T1`–`T15` live in `server/test/api.test.js` and `T16`–`T22` in
+`server/test/admin.test.js`; `U1` is the browser walk-through in
+`server/scripts/ui-check.js`. They are cross-referenced from the traceability table in
+`01-requirements.md`.
 
 | ID | Requirement | Test | Expected result |
 |---|---|---|---|
@@ -51,7 +54,14 @@ Identifiers match the traceability table in `01-requirements.md`.
 | T13 | F4 | vote for a candidate belonging to a different election | 400 `candidate_not_in_election` |
 | T14 | F12, D1 | officer marks a voter as voted on paper, twice | first 200; second 409; the voter can then no longer vote electronically |
 | T15 | F13 | a voter calls the officer endpoint | 403 |
-| T16 (`ui-check`) | F5–F8 | drive the real UI: sign in, pick a candidate, cast, read the receipt | a receipt code is displayed; no browser console errors |
+| T16 | F1, F9 | administrator creates an election | 201; status `draft`; every user enrolled on the roll; it appears in `GET /api/elections` |
+| T17 | F13 | voter **and** officer try to create an election | both 403 `forbidden_role` |
+| T18 | F9, D4 | vote in an election that is still a draft | 409 `election_not_open`; `canVote` is false |
+| T19 | F9 | add a candidate after the session opened | 409 `election_locked` |
+| T20 | F9, F10 | create → 2 candidates → open → vote → close → read results | ballot accepted, then visible in the count; `invariantHolds` true |
+| T21 | F9 | open with no candidates; draft → closed; closed → open | all three rejected 409 (`no_candidates`, `invalid_transition`) |
+| T22 | F11 | inspect the audit log after an administration run | contains `election.created`, `election.candidate_added`, `election.open` |
+| **U1** | F5–F8, F9 | `ui-check`: sign in, vote, read the receipt, then as an administrator create an election, add 2 candidates, open it, and vote in it | receipts shown for both elections; the new election reaches status `open`; no browser console errors |
 
 ### Why T7 is split into two tests
 
@@ -73,7 +83,7 @@ processes racing the same row; that needs a multi-process harness and is listed 
 ```bash
 cd server
 
-npm test                    # 17 unit / component / system tests, in-memory database
+npm test                    # 24 unit / component / system tests, in-memory database
 npm start                   # then, in another shell:
 node scripts/smoke.js          # black-box release checks against the running server
 node scripts/ui-check.js    # drives the real UI in headless Edge and saves screenshots
@@ -86,9 +96,9 @@ node scripts/ui-check.js    # drives the real UI in headless Edge and saves scre
 
 | Suite | Count | Result |
 |---|---|---|
-| `npm test` (unit → system) | 17 | **17 passed, 0 failed** |
+| `npm test` (unit → system) | 24 | **24 passed, 0 failed** |
 | `scripts/smoke.js` (release testing) | 17 checks on a fresh database | **all passed; repeatable** |
-| `scripts/ui-check.js` (browser) | 6 assertions + screenshots | **passed, no console errors** |
+| `scripts/ui-check.js` (browser) | 14 assertions across 8 screenshots, including the full administration flow | **passed, no console errors** |
 
 Current suite output:
 
@@ -110,6 +120,13 @@ Current suite output:
 ✔ T13 a candidate from another election is rejected
 ✔ T14 an officer can mark a paper vote, and it consumes the single-vote right
 ✔ T15 a voter cannot mark anyone as voted
+✔ T16 an administrator creates a draft election and it appears in the list
+✔ T17 a voter cannot create an election
+✔ T18 a draft election cannot be voted in
+✔ T19 candidates cannot be added once the session is open
+✔ T20 an open election with a candidate accepts a vote end to end
+✔ T21 the state machine refuses invalid transitions and empty elections
+✔ T22 creating an election is recorded in the audit log
 ```
 
 ## 4.5 Inspections alongside testing

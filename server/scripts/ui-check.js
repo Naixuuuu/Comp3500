@@ -74,23 +74,101 @@ class CDP {
   }
 }
 
+/** Click a button by its visible text, retrying while Vue catches up. */
+async function clickText(cdp, text, { exact = false, tries = 30 } = {}) {
+  const want = JSON.stringify(text);
+  for (let i = 0; i < tries; i += 1) {
+    const hit = await cdp.eval(`
+      (() => {
+        const t = ${want};
+        const el = [...document.querySelectorAll('button')].find((b) => ${exact
+          ? 'b.textContent.trim() === t'
+          : 'b.textContent.trim().startsWith(t)'});
+        if (!el) return false;
+        el.click();
+        return true;
+      })()
+    `);
+    if (hit) return;
+    await sleep(200);
+  }
+  const available = await cdp.eval(
+    `[...document.querySelectorAll('button')].map((b) => b.textContent.trim())`
+  );
+  throw new Error(`button "${text}" never appeared. Present: ${JSON.stringify(available)}`);
+}
+
+/** Type into a selector, retrying until the element exists. */
+async function fill(cdp, selector, value) {
+  const sel = JSON.stringify(selector);
+  const val = JSON.stringify(value);
+  for (let i = 0; i < 30; i += 1) {
+    const ok = await cdp.eval(`
+      (() => {
+        const el = document.querySelector(${sel});
+        if (!el) return false;
+        el.value = ${val};
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()
+    `);
+    if (ok) return;
+    await sleep(200);
+  }
+  throw new Error(`input "${selector}" never appeared`);
+}
+
+async function text(cdp, selector) {
+  return cdp.eval(`
+    (() => { const el = document.querySelector(${JSON.stringify(selector)});
+             return el ? el.textContent.trim() : null; })()
+  `);
+}
+
+/** Read the demo OTP that the login screen shows in its hint box. */
+async function readOtp(cdp) {
+  for (let i = 0; i < 30; i += 1) {
+    const code = await cdp.eval(`
+      (() => {
+        const m = document.body.innerText.match(/it is\\s+(\\d{6})/);
+        if (m) return m[1];
+        const m2 = document.body.innerText.match(/(\\d{6})/);
+        return m2 ? m2[1] : null;
+      })()
+    `);
+    if (code) return code;
+    await sleep(200);
+  }
+  throw new Error('could not read the demo OTP from the page');
+}
+
+async function signIn(cdp, voterId) {
+  await fill(cdp, '#vid', voterId);
+  await fill(cdp, '#pwd', 'password123');
+  await clickText(cdp, 'Continue');
+  const code = await readOtp(cdp);
+  await fill(cdp, '#otp', code);
+  await clickText(cdp, 'Sign in');
+  await sleep(1200);
+  const shell = await cdp.eval('!!document.querySelector(".bar")');
+  if (!shell) throw new Error(`sign-in as ${voterId} did not reach the app shell`);
+}
+
 async function shot(cdp, name, height = 900) {
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 1180, height, deviceScaleFactor: 2, mobile: false,
   });
-  await sleep(350);
+  await sleep(400);
   const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' });
-  const file = path.join(OUT, `${name}.png`);
-  fs.writeFileSync(file, Buffer.from(data, 'base64'));
-  console.log(`  saved ${path.basename(file)}`);
+  fs.writeFileSync(path.join(OUT, `${name}.png`), Buffer.from(data, 'base64'));
+  console.log(`  saved ${name}.png`);
 }
 
 (async () => {
   console.log(`UI check against ${BASE}`);
   const edge = spawn(EDGE, [
     '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run',
-    `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
-    'about:blank',
+    `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, 'about:blank',
   ], { stdio: 'ignore' });
 
   try {
@@ -107,8 +185,8 @@ async function shot(cdp, name, height = 900) {
 
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
-    const errors = [];
     await cdp.send('Log.enable').catch(() => {});
+    const errors = [];
     ws.addEventListener('message', (ev) => {
       const m = JSON.parse(ev.data);
       if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') {
@@ -116,143 +194,136 @@ async function shot(cdp, name, height = 900) {
       }
     });
 
-    // ---------- login page ----------
+    // ================= 1. login screen =================
     await cdp.send('Page.navigate', { url: BASE + '/' });
     await sleep(1500);
-    const hasForm = await cdp.eval('!!document.querySelector("#vid")');
-    if (!hasForm) throw new Error('login form did not render');
+    if (!(await cdp.eval('!!document.querySelector("#vid")'))) {
+      throw new Error('login form did not render');
+    }
     await shot(cdp, '01-login', 760);
 
-    // ---------- step 1: credentials ----------
-    await cdp.eval(`
-      (() => {
-        const set = (sel, val) => {
-          const el = document.querySelector(sel);
-          el.value = val;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-        };
-        set('#vid', 'V1001');
-        set('#pwd', 'password123');
-        return true;
-      })()
-    `);
-    await sleep(200);
-    await cdp.eval(`[...document.querySelectorAll('button')]
-      .find(b => b.textContent.trim().startsWith('Continue')).click()`);
-    await sleep(900);
-
-    const otpShown = await cdp.eval('!!document.querySelector("#otp")');
-    if (!otpShown) throw new Error('OTP step did not render');
-    const devOtp = await cdp.eval(`
-      (() => {
-        const m = document.body.innerText.match(/it is\\s+(\\d{6})/);
-        return m ? m[1] : (document.body.innerText.match(/(\\d{6})/) || [])[1];
-      })()
-    `);
-    if (!devOtp) throw new Error('could not read the demo OTP from the page');
+    // ================= 2. two-factor sign-in =================
+    await fill(cdp, '#vid', 'V1001');
+    await fill(cdp, '#pwd', 'password123');
+    await clickText(cdp, 'Continue');
+    await readOtp(cdp);
     await shot(cdp, '02-otp', 760);
+    const otp = await readOtp(cdp);
+    await fill(cdp, '#otp', otp);
+    await clickText(cdp, 'Sign in');
+    await sleep(1300);
 
-    // ---------- step 2: OTP ----------
-    await cdp.eval(`
-      (() => {
-        const el = document.querySelector('#otp');
-        el.value = '${devOtp}';
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        return true;
-      })()
-    `);
-    await sleep(200);
-    await cdp.eval(`[...document.querySelectorAll('button')]
-      .find(b => b.textContent.trim().startsWith('Sign in')).click()`);
-    await sleep(1400);
-
-    const inApp = await cdp.eval('!!document.querySelector(".bar")');
-    if (!inApp) throw new Error('app shell did not render after sign-in');
-
-    const electionCount = await cdp.eval('document.querySelectorAll(".chip").length');
-    const candidateCount = await cdp.eval('document.querySelectorAll(".cand").length');
-    console.log(`  elections rendered: ${electionCount}, candidates rendered: ${candidateCount}`);
-    if (candidateCount === 0) throw new Error('ballot candidates did not render');
+    // ================= 3. ballot =================
+    const candidates = await cdp.eval('document.querySelectorAll(".cand").length');
+    console.log(`  candidates rendered: ${candidates}`);
+    if (candidates === 0) throw new Error('ballot candidates did not render');
     await shot(cdp, '03-ballot', 900);
 
-    // ---------- cast a vote if possible ----------
-    const canVote = await cdp.eval(`!document.querySelector('.cand.disabled')`);
-    if (canVote) {
-      await cdp.eval(`document.querySelectorAll('.cand input')[0].click()`);
-      await sleep(200);
-      await cdp.eval(`[...document.querySelectorAll('button')]
-        .find(b => b.textContent.trim().startsWith('Cast ballot')).click()`);
-      await sleep(1600);
-      const receipt = await cdp.eval(`
-        (() => {
-          const el = document.querySelector('.receipt-flash .code');
-          return el ? el.textContent.trim() : null;
-        })()
-      `);
-      console.log(`  receipt shown: ${receipt}`);
-      if (!receipt) throw new Error('receipt was not displayed after voting');
-      await shot(cdp, '04-receipt', 780);
+    // ================= 4. vote =================
+    const canVote = await cdp.eval("!document.querySelector('.cand.disabled')");
+    if (!canVote) {
+      throw new Error('V1001 cannot vote — this database has already been used. '
+        + 'Delete server/data/ and restart for a full run.');
     }
-
-    // ---------- results (auditor) ----------
-    await cdp.eval(`[...document.querySelectorAll('button')]
-      .find(b => b.textContent.trim() === 'Sign out').click()`);
-    await sleep(900);
-
-    await cdp.eval(`
-      (() => {
-        const set = (sel, val) => {
-          const el = document.querySelector(sel);
-          el.value = val;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-        };
-        set('#vid', 'U4001');
-        set('#pwd', 'password123');
-        return true;
-      })()
-    `);
+    await cdp.eval(`document.querySelectorAll('.cand input')[0].click()`);
     await sleep(200);
-    await cdp.eval(`[...document.querySelectorAll('button')]
-      .find(b => b.textContent.trim().startsWith('Continue')).click()`);
-    await sleep(900);
-    const otp2 = await cdp.eval(`
-      (() => {
-        const m = document.body.innerText.match(/it is\\s+(\\d{6})/);
-        return m ? m[1] : (document.body.innerText.match(/(\\d{6})/) || [])[1];
-      })()
-    `);
-    await cdp.eval(`
-      (() => {
-        const el = document.querySelector('#otp');
-        el.value = '${otp2}';
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        return true;
-      })()
-    `);
-    await sleep(200);
-    await cdp.eval(`[...document.querySelectorAll('button')]
-      .find(b => b.textContent.trim().startsWith('Sign in')).click()`);
-    await sleep(1400);
+    await clickText(cdp, 'Cast ballot');
+    await sleep(1600);
+    const receipt = await text(cdp, '.receipt-flash .code');
+    if (!receipt) throw new Error('receipt was not displayed after voting');
+    console.log(`  receipt shown: ${receipt}`);
+    await shot(cdp, '04-receipt', 780);
 
-    await cdp.eval(`[...document.querySelectorAll('button')]
-      .find(b => b.textContent.trim() === 'Results').click()`);
+    // ================= 5. auditor: results and audit log =================
+    await clickText(cdp, 'Sign out', { exact: true });
+    await sleep(900);
+    await signIn(cdp, 'U4001');
+
+    await clickText(cdp, 'Results', { exact: true });
     await sleep(1400);
     const rows = await cdp.eval('document.querySelectorAll("tbody tr").length');
     console.log(`  result rows: ${rows}`);
     if (rows === 0) throw new Error('results table did not render');
+    const invariant = await text(cdp, '.stat.good .n');
+    console.log(`  D2 invariant badge: ${invariant}`);
     await shot(cdp, '05-results', 900);
 
-    await cdp.eval(`[...document.querySelectorAll('button')]
-      .find(b => b.textContent.trim() === 'Audit log').click()`);
+    await clickText(cdp, 'Audit log', { exact: true });
     await sleep(1400);
     const auditRows = await cdp.eval('document.querySelectorAll("tbody tr").length');
     console.log(`  audit rows: ${auditRows}`);
     if (auditRows === 0) throw new Error('audit table did not render');
     await shot(cdp, '06-audit', 900);
 
+    // ================= 6. administrator: create, candidate, open =================
+    await clickText(cdp, 'Sign out', { exact: true });
+    await sleep(900);
+    await signIn(cdp, 'A3001');
+
+    const hasAdminTab = await cdp.eval(
+      `!![...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Admin')`
+    );
+    if (!hasAdminTab) throw new Error('the Admin tab is missing for an administrator');
+    await clickText(cdp, 'Admin', { exact: true });
+    await sleep(1000);
+
+    const title = `E2E Election ${Date.now()}`;
+    await fill(cdp, '.newline input', title);
+    await clickText(cdp, 'Create election');
+    await sleep(1500);
+    if (!(await cdp.eval(`document.body.innerText.includes(${JSON.stringify(title)})`))) {
+      throw new Error('the new election did not appear in the admin view');
+    }
+    console.log(`  created election: ${title}`);
+
+    for (const [name, party] of [['Wong Tin-lok', 'List A'], ['Cheung Mei', 'List B']]) {
+      await fill(cdp, '.row input:nth-of-type(1)', name);
+      await fill(cdp, '.row input:nth-of-type(2)', party);
+      await clickText(cdp, 'Add', { exact: true });
+      await sleep(1300);
+    }
+    const candRows = await cdp.eval('document.querySelectorAll("table tbody tr").length');
+    console.log(`  candidates added: ${candRows}`);
+    if (candRows < 2) throw new Error('candidates did not appear in the admin table');
+
+    await clickText(cdp, 'Open voting session');
+    await sleep(1500);
+    const status = await text(cdp, '.detail .head .tag');
+    console.log(`  status after opening: ${status}`);
+    if (status !== 'open') throw new Error(`expected the session to open, got "${status}"`);
+    await shot(cdp, '07-admin', 980);
+
+    // ================= 7. vote in the election that was just created =================
+    await clickText(cdp, 'Ballot', { exact: true });
+    await sleep(1300);
+    const picked = await cdp.eval(`
+      (() => {
+        const chip = [...document.querySelectorAll('.elections .chip')]
+          .find((c) => c.textContent.includes(${JSON.stringify(title)}));
+        if (!chip) return false;
+        chip.click();
+        return true;
+      })()
+    `);
+    if (!picked) throw new Error('the new election is missing from the ballot view');
+    await sleep(1300);
+
+    const newCands = await cdp.eval('document.querySelectorAll(".cand").length');
+    console.log(`  candidates on the new ballot: ${newCands}`);
+    if (newCands !== 2) throw new Error('the new election should show exactly 2 candidates');
+
+    await cdp.eval(`document.querySelectorAll('.cand input')[0].click()`);
+    await sleep(200);
+    await clickText(cdp, 'Cast ballot');
+    await sleep(1700);
+    const newReceipt = await text(cdp, '.receipt-flash .code');
+    if (!newReceipt) throw new Error('voting in the newly created election returned no receipt');
+    console.log(`  receipt for the new election: ${newReceipt}`);
+    await shot(cdp, '08-new-election-vote', 820);
+
     if (errors.length) {
       console.log('\n  browser console errors:');
-      for (const e of errors) console.log('   -', e);
+      for (const e of errors) console.log('   -', String(e).slice(0, 300));
     } else {
       console.log('\n  no browser console errors');
     }
