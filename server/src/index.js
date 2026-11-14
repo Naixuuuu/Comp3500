@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import { PORT, WEB_DIR } from './config.js';
-import { openDb, seedIfEmpty } from './db.js';
+import { openDb, seedIfEmpty, migrate } from './db.js';
 import { HttpError } from './errors.js';
 import authRoutes from './routes/auth.js';
 import electionRoutes, { receiptRouter } from './routes/elections.js';
@@ -49,6 +49,8 @@ export function createApp() {
 
 export function boot() {
   openDb();
+  const added = migrate();
+  if (added.length) console.log('schema migrated:', added.join(', '));
   seedIfEmpty();
   const app = createApp();
   return app.listen(PORT, () => {

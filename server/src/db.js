@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS elections (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   title      TEXT    NOT NULL,
   status     TEXT    NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','open','closed')),
+  opens_at   TEXT,
+  closes_at  TEXT,
   created_at TEXT    NOT NULL
 );
 
@@ -99,6 +101,34 @@ export function openDb(file = DB_PATH) {
   return db;
 }
 
+/**
+ * Add a column to an existing table when it is missing.
+ *
+ * SQLite has no `ADD COLUMN IF NOT EXISTS`, and `CREATE TABLE IF NOT EXISTS` does nothing to
+ * a table that already exists, so a database created by an earlier version would silently
+ * lack the new columns. This keeps such a database usable instead of forcing a wipe.
+ */
+function ensureColumn(table, column, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (cols.some((c) => c.name === column)) return false;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  return true;
+}
+
+/** Bring an older database up to the current schema. Returns what it changed. */
+export function migrate() {
+  const added = [];
+  if (ensureColumn('elections', 'opens_at', 'opens_at TEXT')) added.push('elections.opens_at');
+  if (ensureColumn('elections', 'closes_at', 'closes_at TEXT')) added.push('elections.closes_at');
+  if (added.length) {
+    // Give any pre-existing election a window so it is not left uneditable.
+    const now = Date.now();
+    db.prepare(`UPDATE elections SET opens_at = ?, closes_at = ? WHERE opens_at IS NULL`)
+      .run(new Date(now - 86400000).toISOString(), new Date(now + 7 * 86400000).toISOString());
+  }
+  return added;
+}
+
 export function closeDb() {
   if (db) {
     db.close();
@@ -152,10 +182,22 @@ export function seedIfEmpty() {
   }
 
   const insElection = db.prepare(
-    'INSERT INTO elections (title, status, created_at) VALUES (?, ?, ?)'
+    'INSERT INTO elections (title, status, opens_at, closes_at, created_at) VALUES (?, ?, ?, ?, ?)'
   );
-  const e1 = Number(insElection.run('Student Union President 2026', 'open', now).lastInsertRowid);
-  const e2 = Number(insElection.run('Faculty Representative 2026', 'closed', now).lastInsertRowid);
+  const day = 86400000;
+  // The open election runs for a week from yesterday; the closed one finished a week ago.
+  const e1 = Number(insElection.run(
+    'Student Union President 2026', 'open',
+    new Date(Date.now() - day).toISOString(),
+    new Date(Date.now() + 6 * day).toISOString(),
+    now,
+  ).lastInsertRowid);
+  const e2 = Number(insElection.run(
+    'Faculty Representative 2026', 'closed',
+    new Date(Date.now() - 14 * day).toISOString(),
+    new Date(Date.now() - 7 * day).toISOString(),
+    now,
+  ).lastInsertRowid);
 
   const insCand = db.prepare(
     'INSERT INTO candidates (election_id, name, party) VALUES (?, ?, ?)'

@@ -255,7 +255,7 @@ async function shot(cdp, name, height = 900) {
     if (auditRows === 0) throw new Error('audit table did not render');
     await shot(cdp, '06-audit', 900);
 
-    // ================= 6. administrator: create, candidate, open =================
+    // ================= 6. administrator: create, edit, candidates, open =================
     await clickText(cdp, 'Sign out', { exact: true });
     await sleep(900);
     await signIn(cdp, 'A3001');
@@ -267,8 +267,20 @@ async function shot(cdp, name, height = 900) {
     await clickText(cdp, 'Admin', { exact: true });
     await sleep(1000);
 
+    // The create form pre-fills a one-week window, so only the title has to be typed.
+    const prefill = await cdp.eval(`
+      (() => {
+        const d = document.querySelectorAll('.create .dt input');
+        return { count: d.length, opens: d[0]?.value || '', closes: d[1]?.value || '' };
+      })()
+    `);
+    console.log(`  create form window inputs: ${prefill.count} (opens=${prefill.opens})`);
+    if (prefill.count !== 2 || !prefill.opens || !prefill.closes) {
+      throw new Error('the voting-window inputs are missing from the create form');
+    }
+
     const title = `E2E Election ${Date.now()}`;
-    await fill(cdp, '.newline input', title);
+    await fill(cdp, '.create > input', title);
     await clickText(cdp, 'Create election');
     await sleep(1500);
     if (!(await cdp.eval(`document.body.innerText.includes(${JSON.stringify(title)})`))) {
@@ -276,22 +288,68 @@ async function shot(cdp, name, height = 900) {
     }
     console.log(`  created election: ${title}`);
 
+    const windowShown = await cdp.eval(`
+      (() => { const el = document.querySelector('.window-line .wvalue');
+               return el ? el.textContent.trim() : null; })()
+    `);
+    console.log(`  window shown in admin: ${windowShown}`);
+    if (!windowShown || !windowShown.includes('→')) {
+      throw new Error('the voting window is not shown for the selected election');
+    }
+
     for (const [name, party] of [['Wong Tin-lok', 'List A'], ['Cheung Mei', 'List B']]) {
       await fill(cdp, '.row input:nth-of-type(1)', name);
       await fill(cdp, '.row input:nth-of-type(2)', party);
       await clickText(cdp, 'Add', { exact: true });
-      await sleep(1300);
+      await sleep(1200);
     }
-    const candRows = await cdp.eval('document.querySelectorAll("table tbody tr").length');
+    let candRows = await cdp.eval('document.querySelectorAll("table tbody tr").length');
     console.log(`  candidates added: ${candRows}`);
     if (candRows < 2) throw new Error('candidates did not appear in the admin table');
 
+    // ---- edit the election (title + window) ----
+    await clickText(cdp, 'Edit', { exact: true });
+    await sleep(600);
+    const editedTitle = `${title} (edited)`;
+    await fill(cdp, '.edit-form .dt.wide input', editedTitle);
+    await clickText(cdp, 'Save changes');
+    await sleep(1400);
+    const renamed = await cdp.eval(`document.body.innerText.includes(${JSON.stringify(editedTitle)})`);
+    console.log(`  renamed to: ${editedTitle} -> ${renamed ? 'ok' : 'NOT SHOWN'}`);
+    if (!renamed) throw new Error('editing the election title did not take effect');
+    await shot(cdp, '07-admin', 1040);
+
+    // ---- add a third candidate, then remove it, to exercise candidate editing ----
+    await fill(cdp, '.row input:nth-of-type(1)', 'Temp Candidate');
+    await fill(cdp, '.row input:nth-of-type(2)', 'Temp Party');
+    await clickText(cdp, 'Add', { exact: true });
+    await sleep(1200);
+    const threeRows = await cdp.eval('document.querySelectorAll("table tbody tr").length');
+    if (threeRows !== 3) throw new Error(`expected 3 candidates, got ${threeRows}`);
+
+    const confirmed = await cdp.eval(`
+      (() => {
+        window.__confirmAnswer = true;
+        window.confirm = () => true;
+        const row = [...document.querySelectorAll('table tbody tr')]
+          .find((tr) => tr.textContent.includes('Temp Candidate'));
+        if (!row) return false;
+        row.querySelector('button.danger').click();
+        return true;
+      })()
+    `);
+    if (!confirmed) throw new Error('could not find the Remove button for the third candidate');
+    await sleep(1400);
+    candRows = await cdp.eval('document.querySelectorAll("table tbody tr").length');
+    console.log(`  candidates after removing one: ${candRows}`);
+    if (candRows !== 2) throw new Error(`expected 2 candidates after removal, got ${candRows}`);
+
+    // ---- open the session ----
     await clickText(cdp, 'Open voting session');
     await sleep(1500);
     const status = await text(cdp, '.detail .head .tag');
     console.log(`  status after opening: ${status}`);
     if (status !== 'open') throw new Error(`expected the session to open, got "${status}"`);
-    await shot(cdp, '07-admin', 980);
 
     // ================= 7. vote in the election that was just created =================
     await clickText(cdp, 'Ballot', { exact: true });
@@ -299,7 +357,7 @@ async function shot(cdp, name, height = 900) {
     const picked = await cdp.eval(`
       (() => {
         const chip = [...document.querySelectorAll('.elections .chip')]
-          .find((c) => c.textContent.includes(${JSON.stringify(title)}));
+          .find((c) => c.textContent.includes(${JSON.stringify(editedTitle)}));
         if (!chip) return false;
         chip.click();
         return true;
@@ -307,6 +365,17 @@ async function shot(cdp, name, height = 900) {
     `);
     if (!picked) throw new Error('the new election is missing from the ballot view');
     await sleep(1300);
+
+    const windowOnBallot = await cdp.eval(`
+      (() => {
+        const rows = [...document.querySelectorAll('.window .wrow')];
+        return rows.map((r) => r.textContent.replace(/\s+/g, ' ').trim());
+      })()
+    `);
+    console.log(`  window rows on the ballot: ${windowOnBallot.length}`);
+    if (windowOnBallot.length !== 2) {
+      throw new Error('the ballot is not showing the voting window');
+    }
 
     const newCands = await cdp.eval('document.querySelectorAll(".cand").length');
     console.log(`  candidates on the new ballot: ${newCands}`);

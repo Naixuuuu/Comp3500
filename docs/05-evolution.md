@@ -38,7 +38,7 @@ examples from this build, both driven by an inspection rather than by a bug repo
 Both are small and local, which is the point: refactoring that is deferred becomes
 reengineering.
 
-## 5.3 Shipped in the second increment
+## 5.3 Shipped in later increments
 
 The first version of this report listed "no create/edit election UI" as the top limitation.
 That increment has since been implemented, and it is recorded here because it is the clearest
@@ -52,6 +52,18 @@ example of the change process in Lecture 9 working as described:
 - The audit trail gained `election.created`, `election.candidate_added`, `election.open` and
   `election.closed`, so the administrator's actions are as observable as the voter's.
 - Tests T17–T22 cover the new paths; the totals moved from 17 to 24.
+
+A third increment added the editing half of the same use cases plus the voting window:
+
+- `PATCH`/`DELETE` on elections and on candidates. Editing stops at `closed` (a published
+  result must describe the question that was actually asked), and deletion is refused once a
+  ballot exists, for the same reason there is no delete-ballot function.
+- `opens_at` / `closes_at` on every election, enforced inside the same `BEGIN IMMEDIATE`
+  transaction as the single-vote rule. The status and the window are independent controls and
+  the API says which one blocked a ballot.
+- Existing databases gain the two columns through `migrate()` on boot, so an installation
+  created by the previous version keeps working without a wipe.
+- Tests T23–T28 cover editing, deletion, and the window; the totals moved from 24 to 30.
 
 It was additive: no existing test changed, and the only schema impact was that
 `createElection` writes `voter_roll` rows up front instead of relying on the seed.

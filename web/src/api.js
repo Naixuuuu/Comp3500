@@ -50,9 +50,14 @@ export const api = {
 
   // ---- administration (role: admin) ----
   adminElection: (id) => request('GET', `/admin/elections/${id}`),
-  createElection: (title) => request('POST', '/admin/elections', { title }),
+  createElection: (title, opensAt, closesAt) =>
+    request('POST', '/admin/elections', { title, opensAt, closesAt }),
+  updateElection: (id, changes) => request('PATCH', `/admin/elections/${id}`, changes),
+  deleteElection: (id) => request('DELETE', `/admin/elections/${id}`),
   addCandidate: (id, name, party) =>
     request('POST', `/admin/elections/${id}/candidates`, { name, party }),
+  updateCandidate: (id, changes) => request('PATCH', `/admin/candidates/${id}`, changes),
+  deleteCandidate: (id) => request('DELETE', `/admin/candidates/${id}`),
   openElection: (id) => request('POST', `/admin/elections/${id}/open`),
   closeElection: (id) => request('POST', `/admin/elections/${id}/close`),
 

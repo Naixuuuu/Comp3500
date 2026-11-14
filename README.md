@@ -80,7 +80,8 @@ project_election/
 │   │   │   └── admin.js           管理员路由（整个 router 挂了 requireRole('admin')）
 │   │   └── index.js              组装 app、托管前端产物
 │   ├── test/api.test.js          17 个测试（node:test）
-│   ├── test/admin.test.js        7 个测试（新建选举 / 权限 / 状态流转）
+│   ├── test/admin.test.js        13 个测试（建/改/删选举与候选人、投票期窗口）
+│   ├── test/migration.test.js    1 个测试（旧数据库升级）
 │   ├── scripts/smoke.js             黑盒发布测试
 │   └── scripts/ui-check.js       用无头浏览器真实跑一遍 UI
 └── web/                       ← Vue 3 + Vite，无 router
@@ -96,7 +97,7 @@ project_election/
 
 ```bash
 cd server
-npm test                 # 24 个测试（17 + 7 管理员），用内存库，跑完不留文件
+npm test                 # 31 个测试，跑完不留文件
 ```
 
 需要对着真实服务验证时：
@@ -126,8 +127,12 @@ node scripts/ui-check.js           # 终端 B：驱动真实浏览器并截图�
 | POST | `/api/elections/:id/mark-voted` | officer / admin | 纸质票路径 |
 | GET | `/api/receipt/:code` | 公开 | 查收据（不泄露选项） |
 | GET | `/api/admin/elections/:id` | admin | 选举详情（候选人 + 名册统计） |
-| POST | `/api/admin/elections` | admin | **新建选举**（草稿状态，自动建名册） |
+| POST | `/api/admin/elections` | admin | **新建选举**（标题 + 投票期窗口，自动建名册） |
+| PATCH | `/api/admin/elections/:id` | admin | **编辑选举**（标题、开始/截止时间；关闭后锁定） |
+| DELETE | `/api/admin/elections/:id` | admin | **删除选举**（已有选票则拒绝） |
 | POST | `/api/admin/elections/:id/candidates` | admin | **添加候选人**（仅草稿期） |
+| PATCH | `/api/admin/candidates/:id` | admin | **编辑候选人**（仅草稿期） |
+| DELETE | `/api/admin/candidates/:id` | admin | **删除候选人**（仅草稿期） |
 | POST | `/api/admin/elections/:id/open` | admin | **开启投票期**（草稿 → 开放） |
 | POST | `/api/admin/elections/:id/close` | admin | **结束投票期**（开放 → 关闭） |
 | GET | `/api/results/:id` | 已登录 | 计票结果 |
@@ -174,7 +179,8 @@ D1 说的是"**每场选举**各一票"。单列标志在两场选举时就是�
 **已实现（可跑通）**
 
 - UC2 认证（密码 + OTP）、UC3 资格检查、UC4 查看选票、UC5 投票、UC6 查收据
-- UC7 开关投票期、UC10 新建选举、UC11 添加候选人 —— 管理员在 **Admin** 标签页操作
+- UC7 开关投票期、UC10 **新建 / 编辑 / 删除**选举、UC11 **增删改**候选人 —— 管理员在 **Admin** 标签页操作
+- **投票期窗口**：每场选举有开始与截止时间，选票页会显示；窗口外即使会话开启也无法投票
 - UC8 纸质票标记（officer）、UC9 计票与查看结果、UC10 查看审计日志
 - 角色隔离：voter / officer / admin / auditor 各自能做什么由 `requireRole` 决定
 
@@ -187,14 +193,29 @@ D1 说的是"**每场选举**各一票"。单列标志在两场选举时就是�
 ### 完整流程（无需种子数据）
 
 1. 用 `A3001` 登录 → **Admin** 标签
-2. 输入标题 → **Create election**（状态 `draft`）
-3. 填候选人姓名与政党 → **Add**（可加多个；开票后锁定）
+2. 输入标题 + **开始/截止时间**（默认已填「现在 → 七天后」）→ **Create election**（状态 `draft`）
+3. 填候选人姓名与政党 → **Add**（可加多个，也可改/删；开票后锁定）
 4. **Open voting session**（`draft` → `open`）
 5. 用任意账号 → **Ballot** 标签 → 选中新选举 → 投票
 6. 管理员 **Close voting session** → **Results** 标签看计票
 
-状态机只允许 `draft → open → closed`，没有任何回退边。所以关闭后不可能再收到选票 ——
+**想改什么就趁现在**：标题和投票期在 `draft` 和 `open` 都能改（`Edit` 按钮），关闭后就锁死了。
+删除选举只在**还没有任何选票**时允许 —— 已经有票的选举是证据，不能删。
+
+状态机只允许 `draft → open → closed`，没有任何回退边。关闭后不可能再收到选票 ——
 这是图 6 的状态图和 `VALID_TRANSITIONS` 表共同保证的。
+
+### 投票期窗口
+
+每场选举有两个时间：`opensAt` 与 `closesAt`。**选票被接受需要同时满足两件事**：
+
+| | 由谁控制 | 违反了返回什么 |
+|---|---|---|
+| 会话状态是 `open` | 管理员手动开关 | `409 election_not_open` |
+| 当前时间在窗口内 | 选举日程 | `409 voting_not_started` / `409 voting_closed` |
+
+两者刻意分开：状态是管理员操作的、会被审计的东西；窗口是日程规则。
+**任意一个都能挡住选票**，返回的错误码告诉你被哪个挡住了。
 
 ---
 

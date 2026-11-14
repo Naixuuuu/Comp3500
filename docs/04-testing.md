@@ -16,7 +16,8 @@ single-iteration project can support:
 
 | Stage | What it means here | Where it lives |
 |---|---|---|
-| **Development testing** | Tests the team runs while building | `server/test/api.test.js` (17 tests) and `server/test/admin.test.js` (7 tests) |
+| **Development testing** | Tests the team runs while building | `server/test/api.test.js` (17 tests), `server/test/admin.test.js` (13 tests) and
+`server/test/migration.test.js` (1 test) |
 | **Release testing** | Black-box checks against the specification, run on a complete build | `server/scripts/smoke.js` (17 checks on a fresh database) and `server/scripts/ui-check.js` (browser) |
 | **User testing** | Acceptance from the point of view of each role | the demo script in §4.6 |
 
@@ -30,7 +31,7 @@ single-iteration project can support:
 
 ## 4.2 Test cases
 
-Identifiers `T1`–`T15` live in `server/test/api.test.js` and `T16`–`T22` in
+Identifiers `T1`–`T15` live in `server/test/api.test.js` and `T16`–`T28` in
 `server/test/admin.test.js`; `U1` is the browser walk-through in
 `server/scripts/ui-check.js`. They are cross-referenced from the traceability table in
 `01-requirements.md`.
@@ -61,7 +62,14 @@ Identifiers `T1`–`T15` live in `server/test/api.test.js` and `T16`–`T22` in
 | T20 | F9, F10 | create → 2 candidates → open → vote → close → read results | ballot accepted, then visible in the count; `invariantHolds` true |
 | T21 | F9 | open with no candidates; draft → closed; closed → open | all three rejected 409 (`no_candidates`, `invalid_transition`) |
 | T22 | F11 | inspect the audit log after an administration run | contains `election.created`, `election.candidate_added`, `election.open` |
-| **U1** | F5–F8, F9 | `ui-check`: sign in, vote, read the receipt, then as an administrator create an election, add 2 candidates, open it, and vote in it | receipts shown for both elections; the new election reaches status `open`; no browser console errors |
+| T23 | F9c | patch a draft election's title and window, then a partial patch, then edit while open, then after closing | first three succeed and untouched fields are preserved; the closed edit is 409 `election_closed_immutable` |
+| T24 | F9d | delete a draft election, then delete one that has ballots | the draft disappears from the list; the one with ballots is 409 `election_has_ballots` |
+| T25 | F11b | rename a candidate, try a duplicate name, then remove one | rename applied; duplicate 409; removal leaves the expected count |
+| T26 | F9b | session open but window starts tomorrow / ended yesterday | `blockedBy` = `voting_not_started` / `voting_closed`; the vote is 409 with the same code |
+| T27 | F9b | create with closing before opening, with no dates, and with an unparsable date | all three 400 `invalid_dates` |
+| T28 | F9b | list elections | every item exposes `opensAt`, `closesAt` and a `windowPhase` in `before`/`inside`/`after` |
+| T29 | — | open a database whose `elections` table predates the window columns, then call `migrate()` | both columns added, the existing row survives with a usable window, and a second call is a no-op |
+| **U1** | F5–F8, F9 | `ui-check`: sign in, vote, read the receipt, then as an administrator create an election with a window, add 2 candidates, **rename it**, add and remove a third candidate, open it, and vote in it | receipts shown for both elections; the rename and the removal take effect; the ballot shows the window; no browser console errors |
 
 ### Why T7 is split into two tests
 
@@ -83,7 +91,7 @@ processes racing the same row; that needs a multi-process harness and is listed 
 ```bash
 cd server
 
-npm test                    # 24 unit / component / system tests, in-memory database
+npm test                    # 31 tests; all in-memory except the migration test
 npm start                   # then, in another shell:
 node scripts/smoke.js          # black-box release checks against the running server
 node scripts/ui-check.js    # drives the real UI in headless Edge and saves screenshots
@@ -96,7 +104,7 @@ node scripts/ui-check.js    # drives the real UI in headless Edge and saves scre
 
 | Suite | Count | Result |
 |---|---|---|
-| `npm test` (unit → system) | 24 | **24 passed, 0 failed** |
+| `npm test` (unit → system) | 31 | **31 passed, 0 failed** |
 | `scripts/smoke.js` (release testing) | 17 checks on a fresh database | **all passed; repeatable** |
 | `scripts/ui-check.js` (browser) | 14 assertions across 8 screenshots, including the full administration flow | **passed, no console errors** |
 
@@ -126,7 +134,14 @@ Current suite output:
 ✔ T19 candidates cannot be added once the session is open
 ✔ T20 an open election with a candidate accepts a vote end to end
 ✔ T21 the state machine refuses invalid transitions and empty elections
-✔ T22 creating an election is recorded in the audit log
+✔ T22 every administrative action is recorded in the audit log
+✔ T23 an election can be edited while it is a draft or open, but not once closed
+✔ T24 an election can be deleted only while it holds no ballots
+✔ T25 candidates can be edited and removed while the election is a draft
+✔ T26 a ballot is refused outside the voting window even while the session is open
+✔ T27 an election cannot be created with a nonsensical window
+✔ T28 the election list exposes the window so the client can show it
+✔ T29 an older database gains the voting-window columns without losing its rows
 ```
 
 ## 4.5 Inspections alongside testing

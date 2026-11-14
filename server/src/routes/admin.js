@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import {
-  createElection, addCandidate, openElection, closeElection, getElectionDetail,
+  createElection, updateElection, deleteElection,
+  addCandidate, updateCandidate, deleteCandidate,
+  openElection, closeElection, getElectionDetail,
 } from '../services/electionService.js';
 
 const r = Router();
 
-// Every route here is administrator-only. The guard is on the router, so a new route added
+// Every route here is administrator-only. The guard sits on the router, so a route added
 // below cannot accidentally ship without it.
 r.use(requireAuth, requireRole('admin'));
 
@@ -15,12 +17,25 @@ r.get('/elections/:id', (req, res, next) => {
   try { res.json(getElectionDetail(req.params.id)); } catch (e) { next(e); }
 });
 
-/** POST /api/admin/elections  { title } — creates a draft election and its roll */
+/** POST /api/admin/elections  { title, opensAt, closesAt } */
 r.post('/elections', (req, res, next) => {
   try {
-    const { title } = req.body || {};
-    res.status(201).json(createElection(req.user, title));
+    const { title, opensAt, closesAt } = req.body || {};
+    res.status(201).json(createElection(req.user, title, opensAt, closesAt));
   } catch (e) { next(e); }
+});
+
+/** PATCH /api/admin/elections/:id  { title?, opensAt?, closesAt? } */
+r.patch('/elections/:id', (req, res, next) => {
+  try {
+    const { title, opensAt, closesAt } = req.body || {};
+    res.json(updateElection(req.user, req.params.id, { title, opensAt, closesAt }));
+  } catch (e) { next(e); }
+});
+
+/** DELETE /api/admin/elections/:id */
+r.delete('/elections/:id', (req, res, next) => {
+  try { res.json(deleteElection(req.user, req.params.id)); } catch (e) { next(e); }
 });
 
 /** POST /api/admin/elections/:id/candidates  { name, party } */
@@ -29,6 +44,19 @@ r.post('/elections/:id/candidates', (req, res, next) => {
     const { name, party } = req.body || {};
     res.status(201).json(addCandidate(req.user, req.params.id, name, party));
   } catch (e) { next(e); }
+});
+
+/** PATCH /api/admin/candidates/:id  { name?, party? } */
+r.patch('/candidates/:id', (req, res, next) => {
+  try {
+    const { name, party } = req.body || {};
+    res.json(updateCandidate(req.user, req.params.id, { name, party }));
+  } catch (e) { next(e); }
+});
+
+/** DELETE /api/admin/candidates/:id */
+r.delete('/candidates/:id', (req, res, next) => {
+  try { res.json(deleteCandidate(req.user, req.params.id)); } catch (e) { next(e); }
 });
 
 /** POST /api/admin/elections/:id/open — draft -> open */

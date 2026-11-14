@@ -47,9 +47,13 @@ rationale, because a requirement without a reason cannot be defended when it is 
 | **F6** | The system **shall** accept exactly one candidate selection per ballot. | The electoral rule is one vote per voter per election; the interface enforces it. |
 | **F7** | The system **shall** store the ballot and mark the voter as having voted **in a single atomic transaction**. | If either step can succeed alone, a voter can vote twice or lose a vote. See D2. |
 | **F8** | The system **shall** return a receipt code to the voter after a ballot is accepted. | The voter needs non-repudiable evidence that the vote was recorded. |
-| **F9** | The system **shall** let an administrator open and close a voting session, and **shall** reject ballots while the session is closed. | Votes must be cast inside a defined window. |
+| **F9** | The system **shall** let an administrator open and close a voting session, and **shall** reject ballots while the session is closed. | The session is the administrative control; nothing else can start or stop voting. |
+| **F9b** | Each election **shall** carry an opening and a closing date-time, and the system **shall** reject ballots cast outside that window even while the session is open. | Two independent controls: the administrator operates the session, the electoral calendar defines when voting is lawful. Either one must be able to stop a ballot. |
+| **F9c** | The system **shall** let an administrator edit an election's title and window until the session is closed, and **shall** refuse further edits afterwards. | Once the count is publishable, rewriting the question that was asked would make the result meaningless. |
+| **F9d** | The system **shall** let an administrator delete an election only while no ballot has been recorded against it. | A recorded ballot is evidence, and deleting its election would delete the evidence (cf. D3). |
 | **F10** | The system **shall** tally accepted ballots per candidate and expose the count plus the number of registered voters who voted. | Turnout is needed alongside the result to interpret it. |
 | **F11** | The system **shall** record an audit entry for every authentication, ballot acceptance, session change, and result view. | The auditor's work depends on a complete, append-only record. |
+| **F11b** | The system **shall** let an administrator add, edit and remove candidates while the election is a draft, and **shall** refuse all three once the session is open. | Editing the ballot after voting starts could change the outcome of votes already cast. |
 | **F12** | The system **shall** let a presiding officer mark a voter as having voted without casting a ballot in the system. | Paper voting at a station must still consume the voter's single-vote right. |
 | **F13** | The system **shall** restrict result viewing to auditors and administrators. | Publishing a partial count early can influence later voters. |
 | **F14** | The system **should** let a voter check that their receipt code was recorded, without revealing the choice. | Supports confidence in the system without breaking ballot secrecy. |
@@ -79,6 +83,7 @@ ways a generic "voting app" would miss.
 | **D2** | The number of accepted ballots **shall** never exceed the number of voters marked as having voted. | This is the invariant an auditor checks first; it must hold after every transaction, including a crash. |
 | **D3** | A vote, once accepted, **shall not** be amendable or deletable by any role, including the administrator. | An amendable vote is not a secret ballot; it is a recorded preference. |
 | **D4** | The result **shall** be publishable only as a complete count for a closed session. | Partial counts during voting are a known influence channel. |
+| **D5** | Voting **shall** be possible only between the published opening and closing date-times. | A ballot cast outside the advertised period has no legal standing, whatever the software does. |
 
 ## 1.6 Validation of these requirements
 
@@ -105,6 +110,10 @@ Lecture 4 defines five checks. Applying them to the table above:
 | F12 | `POST /api/elections/:id/mark-voted`, officer role only | T14 |
 | F13 | `requireRole('auditor','admin')` middleware | T11 |
 | F9 | `elections.status` checked inside the transaction; `POST /api/admin/elections/:id/open|close` | T4, T18, T19, T21 |
+| F9b | `services/window.js`; checked in `castBallot` inside the same transaction | T26 |
+| F9c | `PATCH /api/admin/elections/:id`, refused when status is `closed` | T23 |
+| F9d | `DELETE /api/admin/elections/:id`, refused when ballots exist | T24 |
+| F11b | `POST/PATCH/DELETE /api/admin/candidates/...`, refused when not `draft` | T19, T25 |
 | F1 | `POST /api/admin/elections` creates the election and its roll | T16 |
 | F10 | `resultService.getResults` decrypts and tallies | T20, T12b |
 
